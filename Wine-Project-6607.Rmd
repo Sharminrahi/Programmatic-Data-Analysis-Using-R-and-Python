@@ -1,0 +1,408 @@
+---
+title: "Wine recognition data analysis"
+author: "Sharmin Akhter"
+date: "December 9, 2022"
+output:
+  pdf_document: default
+  html_document: default
+  theme: spacelab
+  word_document: default
+toc: yes
+urlcolor: BrickRed
+---
+
+***
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+#library(caret)
+#library(data.table)
+#library(zoo)
+#library(leaps)
+#library(imputeTS)
+library(dplyr)
+library(MASS)
+library(corrplot)
+library(GGally)
+#library(mosaic)
+```
+
+
+# 1. Introduction
+The title of this database is Wine recognition Data Analysis. The purpose of this project to check the quality of wine from given attributes. The data is obtained from  
+
+    a) Forina, M. et al, PARVUS - An Extendible Package for Data
+       Exploration, Classification and Correlation. Institute of Pharmaceutical
+       and Food Analysis and Technologies, Via Brigata Salerno, 
+       16147 Genoa, Italy.
+       
+    (b) Stefan Aeberhard, email: stefan@coral.cs.jcu.edu.au
+    
+    (c) July 1991
+
+From the above information we can see that each wine was grown in the same city in Italy by three different cultivers. Below are the columns of the dataset:
+
+ + **Class**: predictor
+  + **Alcohol**: Numeric
+  + **Malic Acid**: Numeric
+  + **Ash**: Numeric
+  + **Alcalinity** of Ash: Numeric
+  + **Magnesium**: Integer
+  + **Total Phenols**: Numeric
+  + **Flavanoids**: Numeric
+  + **Nonflavanoids Phenols**: Numeric
+  + **Proanthocyanins**: Numeric
+  + **Color Intensity**: Numeric
+  + **Hue**: Numeric
+  + **OD280/OD315 of diluted wines**: Numeric
+  + **Proline**: Numeric
+
+All the cultivers has 3 classes as follows:
+  class 1 59
+	class 2 71
+	class 3 48
+	
+and number of attributes 13, all are continuous.
+
+# 2. Exploring the dataset
+
+```{r}
+winedata<- read.csv("wine.txt", header = F)
+head(winedata)
+```
+
+
+## Columns
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+colnames(winedata)<- c("Class", "Alcohol", "Malic_acid","Ash","Alcalinity_of_ash","Magnesium","Total_phenols","Flavanoids","Nonflavanoid_phenols","Proanthocyanins",
+                       "Color_intensity","Hue","OD280_OD315_of_diluted_wines","Proline")
+#column_names<- colnames(wine_data)
+colnames(winedata)
+```
+
+#There are total 14 variables, specified to 2 types of data: number and integer. The 1st variable should be factor. Now I will change integer to factor. Then look at the structur eof the data.
+
+```{r}
+winedata$Class <- as.factor(winedata$Class)
+str(winedata)
+```
+
+#Here I am trying to get an idea of 3 classes. Below are the mean of class 1(59), class 2(71), class 3(48) 
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+Class1 <- mean(winedata$Class == 1)
+Class1
+Class2 <- mean(winedata$Class == 2)
+Class2
+Class3 <- mean(winedata$Class == 3)
+Class3
+```
+
+#From the structure we can see that the Malic acid, Alcalinity of ash, Magnesium, Proanthocyanins are non numeric. Now change to non numeric value to numeric
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+winedata$Malic_acid <- as.numeric(winedata$Malic_acid)
+winedata$Alcalinity_of_ash<- as.numeric(winedata$Alcalinity_of_ash)
+winedata$Magnesium<- as.numeric(winedata$Magnesium)
+winedata$Proanthocyanins<- as.numeric(winedata$Proanthocyanins)
+winedata$Proline<- as.numeric(winedata$Proline)
+str(winedata)
+```
+
+After changed the non numeric values to numeric its introduced some NAs. In my next section I will analyze the dataset
+
+# 3. Data Analysis
+
+## Missing values
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+sum(is.na(winedata))
+```
+
+#From the summary of wine data we can see that there are some missing values on the data which are not symmetric. So we will replace missing values with the median.
+
+
+```{r}
+newwinedata<- winedata %>% mutate(across(where(is.numeric), ~replace_na(., median(., na.rm=TRUE))))
+str(newwinedata)
+sum(is.na(newwinedata))
+```
+
+#Summary of new data without NAs
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+summary(newwinedata)
+```
+
+#Lets check the dimension of the data
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+dim(newwinedata)
+```
+
+###The wine dataset has 178 observations, 13 predictors and 1 outcome (Class). All of the predictors are numeric values, outcomes are integer.
+
+The summary shows that some of the variables has wide range compared to the IQR, which may indicate spread in the data and the presence of outliers. We investigate further by producing boxplots for each of the variables:
+
+
+## Outlier detection and count
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+outliers = c()
+for (i in 2:14) {
+  stats = boxplot.stats(newwinedata[[i]])$stats
+  bottom_outlier_rows = which(newwinedata[[i]] < stats[1])
+  top_outlier_rows = which(newwinedata[[i]] > stats[5])
+  outliers = c(outliers , top_outlier_rows[ !top_outlier_rows %in% outliers ] )
+  outliers = c(outliers , bottom_outlier_rows[ !bottom_outlier_rows %in% outliers ] )
+}
+outliers
+```
+
+
+###Use cooks distance to detect influential observations
+
+```{r}
+mod<- lm(as.integer(Class) ~., data = newwinedata)
+cooksd<- cooks.distance(mod)
+plot(cooksd, pch = "*", cex = 2, main = "Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm = T), col = "red")
+
+```
+
+
+## Clean outliers
+
+```{r}
+clean_outliers = as.numeric(rownames(newwinedata[cooksd > 4 * mean(cooksd, na.rm=T),]))
+outliers = c(outliers, clean_outliers[!clean_outliers %in% outliers ])
+
+clean_Data = newwinedata[-outliers,]
+summary(clean_Data)
+str(clean_Data)
+```
+## Correlation Matrix
+
+```{r}
+options(repr.plot.width=6, repr.plot.height=4)  
+
+ggcorr(clean_Data[,2:14], geom = "blank", label = TRUE, 
+       hjust = 0.9, layout.exp = 2) +
+  geom_point(size = 8, aes(color = coefficient > 0, 
+                           alpha = abs(coefficient) > 0.25)) +
+  scale_alpha_manual(values = c("TRUE" = 0.25, "FALSE" = 0)) +
+  guides(color = FALSE, alpha = FALSE)
+```
+
+## Physical Interpretation
+
+In this correlation matrix we used 'ggcor' function from 'ggally' to show the correlation coefficients for each of the variables in the data sets. The diagonal elements of the matrix are labeled with the names of the variables. Here we choose absolute value of coefficients greater than 25% to show the transparency of the points on the matrix. The point with value greater than 25% has lower transparency and less or equal 25% has higher transparency. Also from this matrix we can tells that the points with red color are negatively correlated with each pair of the variables and point with blue color are negatively correlated. Overall we can say correlation matrix provides a useful overview of the relationships between the different variables in the data sets, and can help us gain insights into the data.
+
+
+# 4. Exploring the Relationships Between Variables
+
+In order to understand our data sets we are interested in visualizing the each variables by Class. In this section we will show our work by creating Box plot, Violin plot, Histogram and at the last Density distribution plot to analyze the distribution of each variable using the ggplot package.
+
+## Box Plot
+
+Distribution of Alcohol, Malic_acid, Ash, Alcalinity_of_ash in the dataset using Boxplot.
+
+```{r}
+clean_Data%>% gather(2:5, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_boxplot()+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+ 
+Distribution of Magnesium, Total_phenols, Nonflavanoid_phenols, Flavanoids in the dataset using Boxplot.
+
+```{r}
+clean_Data%>% gather(6:9, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_boxplot()+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+Distribution of Proanthocyanins, Color_intensity, Hue, OD280_OD315_of_diluted_wines, Proline in the dataset using Boxplot.
+
+
+```{r}
+clean_Data%>% gather(10:14, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_boxplot()+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+## Physical Interpretation
+
+- The Box plot visiualized the distribution of each of the variables by their class.
+
+- In these plot we use facet with free scaling to see the range, median and quartiles for each variable. It also allows us to see the spread and central tendency of the data.
+
+- By using jittered scatter plot we want to see the overall shape of the data distribution, while box plot highlighting any outliers or unusual values.
+
+- By comparing the distributions of the different variables, we can see how they relate to each other and identify any potential patterns or trends in the data.
+
+From overall figure we can see the except Alcalinity_of_ash, hue, Proline all other variables has outliers.
+
+***
+
+## Violin Plot
+
+Distribution of Alcohol,  Ash, Malic_acid in the dataset using Boxplot.
+
+
+```{r}
+clean_Data%>% gather(2:4, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_violin()+
+  stat_summary(fun = "mean",
+               geom = "point",
+               aes(color = "Mean")) +
+  stat_summary(fun = "median",
+               geom = "point",
+               aes(color = "Median"))+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+Distribution of Magnesium, Total_phenols, Nonflavanoid_phenols, Flavanoids in the dataset using Boxplot.
+
+
+```{r}
+clean_Data%>% gather(5:7, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_violin()+
+  stat_summary(fun = "mean",
+               geom = "point",
+               aes(color = "Mean")) +
+  stat_summary(fun = "median",
+               geom = "point",
+               aes(color = "Median"))+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+```{r}
+clean_Data%>% gather(8:10, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.5)+
+  geom_violin()+
+  stat_summary(fun = "mean",
+               geom = "point",
+               aes(color = "Mean")) +
+  stat_summary(fun = "median",
+               geom = "point",
+               aes(color = "Median"))+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+
+```{r}
+clean_Data%>% gather(11:14, key = "variables", value = "result") %>%
+  ggplot(aes(Class, result, fill = Class)) +
+  geom_jitter(color = "grey", alpha = 0.3)+
+  geom_violin()+
+  stat_summary(fun = "mean",
+               geom = "point",
+               aes(color = "Mean")) +
+  stat_summary(fun = "median",
+               geom = "point",
+               aes(color = "Median"))+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+## Physical Interpretation
+
+This figure shows the distribution of multiple variables, separated by class, using a combination of a jitter plot, violin plot, and summary statistics. The jitter plot allows us to visualize the density of the data, while the violin plot shows the distribution of the data. The summary statistics, such as the mean and median, provide additional information about the distribution of each variable. 
+
+## Histogram
+
+distribution of values for each of the columns
+
+```{r}
+clean_Data %>% gather(2:5, key = "variables", value = "result") %>%
+  ggplot(aes(result)) +
+  geom_histogram(aes(fill = variables), color = "white")+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free") +
+  theme(legend.position = "none")
+
+```
+
+
+```{r}
+clean_Data %>% gather(6:9, key = "variables", value = "result") %>%
+  ggplot(aes(result)) +
+  geom_histogram(aes(fill = variables), color = "white")+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free") +
+  theme(legend.position = "none")
+```
+
+
+```{r}
+clean_Data %>% gather(10:14, key = "variables", value = "result") %>%
+  ggplot(aes(result)) +
+  geom_histogram(aes(fill = variables), color = "white")+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free") +
+  theme(legend.position = "none")
+
+```
+
+Next, I want to visualize the variables by class. To do this, I will make distributions of the variables and
+overlap them by class.
+
+## Density Plot
+
+A density plot is a graphical representation of the distribution of a numeric variable. It shows the frequency of the values on the x-axis, and the density of the values on the y-axis. Its useful for visualizing the overall shape of a distribution and identifying any potential outliers or unusual values. 
+
+
+```{r}
+clean_Data %>% gather(2:5, key = "variables", value = "result") %>%
+  ggplot(aes(result, fill = Class)) +
+  geom_density(alpha = 0.7)+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+```{r}
+clean_Data %>% gather(6:9, key = "variables", value = "result") %>%
+  ggplot(aes(result, fill = Class)) +
+  geom_density(alpha = 0.7)+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+```{r}
+clean_Data %>% gather(10:14, key = "variables", value = "result") %>%
+  ggplot(aes(result, fill = Class)) +
+  geom_density(alpha = 0.7)+
+  theme_get()+
+  facet_wrap(.~variables, scale = "free")
+```
+
+# 5. Summary
+
+Overall in this wine recognition data sets analysis we start with exploratory data analysis. We looked for outliers, missing values/ unusual values and clean those values by different method in this section. In the next section to understand the relationship between different variables by class we introduced 4 different plots. Each plots shows the relation of each variables by class. First we make box plot to see if there is any outliers or not, We choose violin plot with summary statistics for closer view of variables. Next, by applying histogram we can see the distribution of each variable in each class, their maximum minimum values and other statistics summary. Atlast we saw the distribution of each variable in density plot and all the variables are well distributed by class.
+
+
+
+
+
+
